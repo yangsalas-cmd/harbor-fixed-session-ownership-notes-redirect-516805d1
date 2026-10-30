@@ -1,12 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../worker/index.js';
-const cookie='harbor_session='+btoa(JSON.stringify({username:'alice',role:'customer'}));
-const call=(path,body,session=cookie)=>worker.fetch(new Request('https://lab.test'+path,{method:body?'POST':'GET',headers:{cookie:session,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
-test('dashboard and normal demo flows work',async()=>{const home=await call('/');assert.equal(home.status,200);assert.match(await home.text(),/Your money, in focus/);assert.equal((await call('/api/demo-login',{})).status,200);assert.equal((await call('/api/accounts/1001')).status,200);assert.equal((await call('/api/transfers',{from:'1001',to:'1002',amount:1})).status,200)});
-test('reject malformed transfer input and unauthenticated account reads',async()=>{assert.equal((await call('/api/transfers',{from:'1001',to:'1002',amount:-1})).status,400);assert.equal((await call('/api/accounts/1001',null,'')).status,401)});
-test('seed 1: unsigned session permits forged administrative access',async()=>{assert.equal((await call('/api/admin/accounts')).status,403);const forged='harbor_session='+btoa(JSON.stringify({username:'alice',role:'admin'}));assert.equal((await call('/api/admin/accounts',null,forged)).status,200)});
-test('seed 2: customer can read and debit another synthetic account',async()=>{assert.equal((await call('/api/accounts/1002')).status,200);assert.equal((await call('/api/transfers',{from:'1002',to:'1001',amount:1})).status,200)});
-test('seed 3: saved HTML reaches an unsafe browser rendering sink',async()=>{const note='<img src=x onerror="document.body.dataset.labXss=1">';assert.equal((await call('/api/notes',{note})).status,200);assert.ok((await(await call('/api/notes')).json()).notes.includes(note));assert.match(await(await call('/')).text(),/innerHTML=data.notes.map/)});
-test('seed 4: untrusted redirect target is accepted',async()=>{const r=await call('/continue?next=https%3A%2F%2Fexample.org');assert.equal(r.status,302);assert.equal(r.headers.get('location'),'https://example.org/')});
-test('seed 5: diagnostics reveal implementation details without sign-in',async()=>{const r=await call('/api/diagnostics',null,'');assert.equal(r.status,200);assert.equal((await r.json()).sessionFormat,'base64-json')});
+import {readFile} from 'node:fs/promises';
+const source=await readFile(new URL('../worker/index.js',import.meta.url),'utf8');
+const {default:worker,testBalances}=await import('data:text/javascript;base64,'+Buffer.from(source+'\nexport const testBalances=()=>[...accounts.values()].map(a=>({id:a.id,balance:a.balance}));').toString('base64'));
+const fixed = new Set(["session","ownership","notes","redirect"]);
+const forged=(claims)=>'harbor_session='+btoa(JSON.stringify(claims));
+const request=(path,body,cookie='')=>worker.fetch(new Request('http://127.0.0.1:4173'+path,{method:body?'POST':'GET',headers:{cookie,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
+const login=async()=>{const r=await request('/api/demo-login',{});assert.equal(r.status,200);return r.headers.get('set-cookie').split(';')[0]};
+test('legitimate login, own reads, notes and outbound payment remain functional',async()=>{
+ const c=await login();assert.equal((await request('/',undefined,c)).status,200);
+ assert.equal((await request('/api/accounts/1001',undefined,c)).status,200);
+ assert.equal((await request('/api/transfers',{from:'1001',to:'1002',amount:10},c)).status,200);
+ assert.equal((await request('/api/notes',{note:'Friday reminder'},c)).status,200);
+ assert.ok((await(await request('/api/notes',undefined,c)).json()).notes.includes('Friday reminder'));
+ assert.equal((await request('/api/transfers',{from:'1001',to:'1002',amount:-1},c)).status,400);
+ assert.equal((await request('/api/accounts/1001')).status,401);
+});
+test('session integrity and privilege boundary',async()=>{
+ const c=await login();assert.equal((await request('/api/admin/accounts',undefined,c)).status,403);
+ for(const claims of [{username:'alice',role:'admin'},{username:'bob',role:'customer'}]) {
+  assert.equal((await request('/api/accounts/1002',undefined,forged(claims))).status,fixed.has('session')?401:200);
+ }
+ assert.equal((await request('/api/admin/accounts',undefined,forged({username:'alice',role:'admin'}))).status,fixed.has('session')?401:200);
+ if(fixed.has('session')) {
+  assert.notEqual(c,await login());assert.equal((await request('/api/accounts/1001',undefined,'harbor_session=unknown')).status,401);
+  const now=Date.now;try{Date.now=()=>now()+3600001;assert.equal((await request('/api/accounts/1001',undefined,c)).status,401)}finally{Date.now=now}
+ }
+});
+test('account ownership: both disclosure and unauthorized debit',async()=>{
+ const c=await login();const aliceBefore=(await(await request('/api/accounts/1001',undefined,c)).json()).balance;
+ const bobBefore=testBalances().find(a=>a.id==='1002').balance;
+ assert.equal((await request('/api/accounts/1002',undefined,c)).status,fixed.has('ownership')?403:200);
+ for(const amount of [1000,0.25]) assert.equal((await request('/api/transfers',{from:'1002',to:'1001',amount},c)).status,fixed.has('ownership')?403:200);
+ const aliceAfter=(await(await request('/api/accounts/1001',undefined,c)).json()).balance;
+ if(fixed.has('ownership')){assert.equal(aliceAfter,aliceBefore);assert.equal(testBalances().find(a=>a.id==='1002').balance,bobBefore)}else assert.equal(aliceAfter,aliceBefore+1000.25);
+ assert.equal((await request('/api/accounts/no-such-account',undefined,c)).status,404);
+ assert.equal((await request('/api/transfers',{from:'1001',to:'1002',amount:1},c)).status,200);
+});
+test('note strings are preserved and renderer uses the selected safe or vulnerable sink',async()=>{
+ const c=await login();for(const note of ['<img src=x onerror="document.body.dataset.labXss=1">','<svg onload="document.body.dataset.labXss=2"></svg>']) {
+ assert.equal((await request('/api/notes',{note},c)).status,200);assert.ok((await(await request('/api/notes',undefined,c)).json()).notes.includes(note));}
+ const home=await(await request('/')).text();if(fixed.has('notes')){assert.match(home,/p.textContent=n/);assert.doesNotMatch(home,/innerHTML=data.notes/)}else assert.match(home,/innerHTML=data.notes/);
+});
+test('continuation URL parser and external destinations',async()=>{
+ const destinations=fixed.has('redirect')?['https://example.org','//example.org','https://127.0.0.1:4173@example.org','https:\\example.org','javascript:alert(1)','data:text/html,hi']:['https://example.org'];
+ for(const dest of destinations) {
+ const r=await request('/continue?next='+encodeURIComponent(dest));assert.equal(r.status,fixed.has('redirect')?400:302);}
+ for(const dest of (fixed.has('redirect')?['/','/?view=overview','http://127.0.0.1:4173/']:['http://127.0.0.1:4173/']))assert.equal((await request('/continue?next='+encodeURIComponent(dest))).status,302);
+ assert.equal((await request('/continue')).status,302);
+});
+test('diagnostics remain explicitly informational',async()=>{assert.equal((await request('/api/diagnostics')).status,200)});

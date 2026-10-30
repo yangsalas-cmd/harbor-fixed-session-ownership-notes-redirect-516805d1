@@ -3,11 +3,14 @@ const accounts = new Map([
   ['1002', {id:'1002',owner:'bob',name:'Everyday account',balance:18200,sortCode:'04-00-26',number:'•••• 1002'}]
 ]);
 const notes = new Map();
+const sessions = new Map();
 const json = (data,status=200) => new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 function user(request) {
   const value = /(?:^|;\s*)harbor_session=([^;]+)/.exec(request.headers.get('cookie') || '')?.[1];
   if (!value) return null;
-  try { return JSON.parse(atob(value)); } catch { return null; }
+  const session = sessions.get(value);
+  if (!session || session.expiresAt <= Date.now()) { sessions.delete(value); return null; }
+  return session;
 }
 const html = String.raw`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Harbor — Banking lab</title><style>
 :root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#172926;background:#f3f5f1}*{box-sizing:border-box}body{margin:0}.notice{background:#f0e4c5;color:#665222;font-size:12px;text-align:center;padding:9px 16px;letter-spacing:.2px}.shell{display:grid;grid-template-columns:228px 1fr;min-height:calc(100vh - 34px)}aside{background:#102e29;color:#d5e3dc;padding:34px 22px;display:flex;flex-direction:column}.brand{font-family:Georgia,serif;font-size:32px;color:#fff;letter-spacing:-1.5px;margin:0 0 50px}.brand span{color:#c6df96}nav{display:grid;gap:9px}button,a{font:inherit}nav button{color:#c4d5cf;background:none;border:0;text-align:left;padding:14px;border-radius:8px;cursor:pointer}nav button.active{background:#24453b;color:#e0f1b2}nav b{margin-right:12px;font-size:18px}.aside-foot{margin-top:auto;padding-top:50px;font-size:12px;color:#9fb7ab;line-height:1.8}main{padding:34px 48px;max-width:1400px;width:100%;margin:auto}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:38px}.crumb{color:#82918a;font-size:13px}.avatar{display:flex;gap:12px;align-items:center;font-size:13px}.avatar strong{background:#dce7d3;width:38px;height:38px;border-radius:50%;display:grid;place-items:center}.topline{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}h1{font-family:Georgia,serif;font-size:37px;font-weight:normal;margin:0 0 9px;letter-spacing:-1px}.muted{color:#718079;font-size:14px}.primary,.secondary{border:0;padding:12px 19px;border-radius:7px;cursor:pointer;background:#163e31;color:#fff}.secondary{background:#e5ebdf;color:#234e3c}.cards{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:18px}.card{border:1px solid #dde3d9;background:#fff;border-radius:12px;padding:24px}.balance{background:#163e31;color:white;position:relative;overflow:hidden}.balance:after{content:'H';position:absolute;right:-10px;bottom:-65px;font:220px Georgia;opacity:.06}.eyebrow{font-size:12px;letter-spacing:1px;text-transform:uppercase}.money{font-size:34px;letter-spacing:-1.1px;margin:20px 0 23px}.card small{font-size:12px;color:#7e8a81}.balance small{color:#bfd0b8}.row{display:flex;justify-content:space-between;align-items:center;gap:14px}.pill{padding:5px 9px;border-radius:20px;background:#e8f0dc;color:#4a693b;font-size:11px}.card h3{font-size:14px;font-weight:500;margin:0 0 20px}.metric{font-size:28px;margin:12px 0}.chart{display:flex;gap:9px;height:44px;align-items:end}.chart i{flex:1;background:#dae6c9;border-radius:3px 3px 0 0}.lower{display:grid;grid-template-columns:1.9fr 1fr;gap:22px;margin-top:25px}.section-title{font-size:17px;font-weight:500;margin:0 0 20px}table{border-collapse:collapse;width:100%;font-size:13px}th{text-align:left;color:#8a958f;font-size:11px;font-weight:400;padding:0 0 14px}td{padding:17px 0;border-top:1px solid #eff1ec}td:last-child,th:last-child{text-align:right}.merchant{display:flex;align-items:center;gap:12px}.merchant span{display:grid;place-items:center;background:#f0f3eb;border-radius:8px;width:34px;height:34px}.positive{color:#51814e}.budget{margin:22px 0}.budget p{font-size:13px;margin:0 0 10px}.bar{height:6px;background:#eef1e9;border-radius:9px}.bar i{display:block;background:#a8bf81;height:100%;border-radius:9px}.subpanel{margin-top:25px}label{display:block;font-size:12px;margin:15px 0 7px}input,textarea,select{font:inherit;border:1px solid #d6dfd0;border-radius:6px;padding:11px;width:100%;background:white;color:#183b2d}dialog{border:0;border-radius:14px;padding:30px;max-width:430px;width:90%;box-shadow:0 20px 70px #102b2933}dialog::backdrop{background:#132f2966}.close{float:right;border:0;background:none;cursor:pointer;font-size:20px}.feedback{font-size:13px;min-height:20px;color:#476c40;margin-top:12px}.hidden{display:none!important}.tabs-view{animation:fade .2s}@keyframes fade{from{opacity:.3}to{opacity:1}}footer{font-size:11px;color:#819084;margin-top:30px;display:flex;justify-content:space-between}.lab-banner{font-size:13px;padding:15px;background:#edf1e6;border-radius:8px;line-height:1.7}.link{color:#356343}.notes-list{font-size:14px;line-height:1.8}@media(max-width:1050px){main{padding:30px 25px}.cards{grid-template-columns:1fr 1fr}.balance{grid-column:1/-1}.lower{grid-template-columns:1fr}}@media(max-width:700px){.shell{grid-template-columns:1fr}aside{padding:20px}.brand{margin:0 0 16px}nav{display:flex;overflow:auto}nav button{white-space:nowrap;padding:10px}.aside-foot{display:none}main{padding:25px 18px}.topline{align-items:start;gap:15px}h1{font-size:30px}.cards{gap:12px}.card{padding:18px}.money{font-size:30px}header{margin-bottom:24px}.muted{font-size:12px}th:nth-child(2),td:nth-child(2){display:none}.avatar>span{display:none}}
@@ -20,7 +23,7 @@ function view(id){document.querySelectorAll('.tabs-view').forEach(e=>e.classList
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>view(b.dataset.view));document.getElementById('pay-open').onclick=()=>view('payments');document.getElementById('goal-button').onclick=()=>document.getElementById('goal-dialog').showModal();document.getElementById('goal-close').onclick=()=>document.getElementById('goal-dialog').close();
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data}
 async function refresh(){const a=await api('/api/accounts/'+currentAccount);document.getElementById('balance').textContent=new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP'}).format(a.balance)}
-async function loadNotes(){try{const data=await api('/api/notes');document.getElementById('notes-list').innerHTML=data.notes.map(n=>'<p>'+n+'</p>').join('')}catch(e){document.getElementById('note-result').textContent=e.message}}
+async function loadNotes(){try{const data=await api('/api/notes');document.getElementById('notes-list').replaceChildren(...data.notes.map(n=>{const p=document.createElement('p');p.textContent=n;return p}))}catch(e){document.getElementById('note-result').textContent=e.message}}
 document.getElementById('payment-form').onsubmit=async e=>{e.preventDefault();const out=document.getElementById('payment-result');try{await api('/api/transfers',{from:currentAccount,to:document.getElementById('to').value,amount:Number(document.getElementById('amount').value)});out.textContent='Demo payment sent.';await refresh()}catch(err){out.textContent=err.message}};
 document.getElementById('note-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/notes',{note:document.getElementById('note').value});document.getElementById('note').value='';await loadNotes();document.getElementById('note-result').textContent='Note saved.'}catch(err){document.getElementById('note-result').textContent=err.message}};
 (async()=>{try{await api('/api/demo-login',{});await refresh()}catch(e){document.getElementById('balance').textContent='Unavailable'}})();
@@ -30,9 +33,17 @@ export default {
     const url = new URL(request.url);
     if (request.method==='GET' && url.pathname==='/') return new Response(html,{headers:{'content-type':'text/html; charset=utf-8'}});
     if (request.method==='POST' && url.pathname==='/api/demo-login') {
-      return new Response(JSON.stringify({ok:true}),{headers:{'content-type':'application/json','set-cookie':'harbor_session='+btoa(JSON.stringify({username:'alice',role:'customer'}))+'; HttpOnly; SameSite=Strict; Path=/'}});
+      const token = crypto.randomUUID();
+      for (const [key, session] of sessions) if (session.expiresAt <= Date.now()) sessions.delete(key);
+      sessions.set(token, {username:'alice',role:'customer',expiresAt:Date.now()+3600000});
+      return new Response(JSON.stringify({ok:true}),{headers:{'content-type':'application/json','set-cookie':'harbor_session='+token+'; HttpOnly; SameSite=Strict; Path=/'}});
     }
-    if (request.method==='GET' && url.pathname==='/continue') return Response.redirect(url.searchParams.get('next')||url.origin,302);
+    if (request.method==='GET' && url.pathname==='/continue') {
+      let next;
+      try { next = new URL(url.searchParams.get('next') || '/', url); } catch { return json({error:'Invalid destination'},400); }
+      if (next.origin !== url.origin) return json({error:'External destination rejected'},400);
+      return Response.redirect(next.href,302);
+    }
     if (request.method==='GET' && url.pathname==='/api/diagnostics') return json({application:'Harbor',version:'1.0.0-lab',runtime:'worker-esm',internalRoutes:['/api/admin/accounts','/api/transfers'],sessionFormat:'base64-json',buildPath:'/srv/harbor/worker/index.js'});
     const actor=user(request);
     if (!actor) return json({error:'Sign in to the demo first'},401);
@@ -42,12 +53,15 @@ export default {
     }
     if (request.method==='GET' && url.pathname.startsWith('/api/accounts/')) {
       const account=accounts.get(url.pathname.split('/').pop());
-      return account?json(account):json({error:'Account not found'},404);
+      if (!account) return json({error:'Account not found'},404);
+      if (account.owner !== actor.username) return json({error:'Account access denied'},403);
+      return json(account);
     }
     if (request.method==='POST' && url.pathname==='/api/transfers') {
       let body;try{body=await request.json()}catch{return json({error:'Invalid JSON'},400)}
       const from=accounts.get(body.from),to=accounts.get(body.to),amount=body.amount;
       if(!from||!to||from===to||typeof amount!=='number'||!Number.isFinite(amount)||amount<=0||Math.round(amount*100)!==amount*100)return json({error:'Invalid transfer'},400);
+      if(from.owner !== actor.username)return json({error:'Account access denied'},403);
       if(from.balance<amount)return json({error:'Insufficient demo funds'},400);
       from.balance=Math.round((from.balance-amount)*100)/100;to.balance=Math.round((to.balance+amount)*100)/100;
       return json({ok:true,balance:from.balance});
