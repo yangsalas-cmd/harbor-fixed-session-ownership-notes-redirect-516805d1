@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import worker from '../worker/index.js';
+const cookie='harbor_session='+btoa(JSON.stringify({username:'alice',role:'customer'}));
+const call=(path,body,session=cookie)=>worker.fetch(new Request('https://lab.test'+path,{method:body?'POST':'GET',headers:{cookie:session,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
+test('dashboard and normal demo flows work',async()=>{const home=await call('/');assert.equal(home.status,200);assert.match(await home.text(),/Your money, in focus/);assert.equal((await call('/api/demo-login',{})).status,200);assert.equal((await call('/api/accounts/1001')).status,200);assert.equal((await call('/api/transfers',{from:'1001',to:'1002',amount:1})).status,200)});
+test('reject malformed transfer input and unauthenticated account reads',async()=>{assert.equal((await call('/api/transfers',{from:'1001',to:'1002',amount:-1})).status,400);assert.equal((await call('/api/accounts/1001',null,'')).status,401)});
+test('seed 1: unsigned session permits forged administrative access',async()=>{assert.equal((await call('/api/admin/accounts')).status,403);const forged='harbor_session='+btoa(JSON.stringify({username:'alice',role:'admin'}));assert.equal((await call('/api/admin/accounts',null,forged)).status,200)});
+test('seed 2: customer can read and debit another synthetic account',async()=>{assert.equal((await call('/api/accounts/1002')).status,200);assert.equal((await call('/api/transfers',{from:'1002',to:'1001',amount:1})).status,200)});
+test('seed 3: saved HTML reaches an unsafe browser rendering sink',async()=>{const note='<img src=x onerror="document.body.dataset.labXss=1">';assert.equal((await call('/api/notes',{note})).status,200);assert.ok((await(await call('/api/notes')).json()).notes.includes(note));assert.match(await(await call('/')).text(),/innerHTML=data.notes.map/)});
+test('seed 4: untrusted redirect target is accepted',async()=>{const r=await call('/continue?next=https%3A%2F%2Fexample.org');assert.equal(r.status,302);assert.equal(r.headers.get('location'),'https://example.org/')});
+test('seed 5: diagnostics reveal implementation details without sign-in',async()=>{const r=await call('/api/diagnostics',null,'');assert.equal(r.status,200);assert.equal((await r.json()).sessionFormat,'base64-json')});
